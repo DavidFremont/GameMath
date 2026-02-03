@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Class Game Master - Logic Elite</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+        * { font-family: 'Plus Jakarta Sans', sans-serif; }
+        
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            margin: 0;
+        }
+        
+        @keyframes float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-15px); } }
+        .animate-float { animation: float 3s ease-in-out infinite; }
+        
+        .group-card { 
+            transition: all 0.3s ease; 
+            background: white;
+            border-radius: 1.5rem;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        .group-card:hover { transform: translateY(-8px); shadow: 0 20px 40px rgba(0,0,0,0.2); }
+
+        #fireworks { position: fixed; inset: 0; pointer-events: none; z-index: 9999; }
+        .firework {
+            position: absolute; width: 6px; height: 6px; border-radius: 50%;
+            animation: explode 1.2s ease-out forwards;
+        }
+        @keyframes explode {
+            0% { transform: translate(0, 0) scale(1); opacity: 1; }
+            100% { transform: translate(var(--x), var(--y)) scale(0.2); opacity: 0; }
+        }
+    </style>
+</head>
+<body>
+    <div id="app"></div>
+    <div id="fireworks"></div>
+
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script type="text/babel">
+        const { useState, useRef } = React;
+
+        function createFirework() {
+            const container = document.getElementById('fireworks');
+            if (!container) return;
+            const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff'];
+            const x = Math.random() * window.innerWidth;
+            const y = Math.random() * (window.innerHeight * 0.5);
+            for (let i = 0; i < 25; i++) {
+                const particle = document.createElement('div');
+                particle.className = 'firework';
+                particle.style.left = x + 'px'; particle.style.top = y + 'px';
+                particle.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+                const angle = (Math.PI * 2 * i) / 25;
+                const velocity = 60 + Math.random() * 80;
+                particle.style.setProperty('--x', (Math.cos(angle) * velocity) + 'px');
+                particle.style.setProperty('--y', (Math.sin(angle) * velocity) + 'px');
+                container.appendChild(particle);
+                setTimeout(() => particle.remove(), 1200);
+            }
+        }
+
+        function App() {
+            const [stage, setStage] = useState('round1');
+            const [loading, setLoading] = useState(false);
+            const [groups, setGroups] = useState([]);
+            const [results, setResults] = useState([]);
+            const audioRef = useRef(null);
+
+            const readExcel = (file) => {
+                return new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const workbook = XLSX.read(e.target.result, { type: 'array' });
+                        resolve(XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]));
+                    };
+                    reader.readAsArrayBuffer(file);
+                });
+            };
+
+            const handleRound1 = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                setLoading(true);
+                const data = await readExcel(file);
+                
+                // LOGIC: Phân chia cân bằng (Elite)
+                const students = data.map(r => ({ 
+                    name: r['Họ Tên'] || r['Tên'], 
+                    score: parseFloat(r['Điểm Số'] || r['Diem'] || 0) 
+                }));
+                
+                const cat1 = students.filter(s => s.score >= 8).sort((a,b) => b.score - a.score);
+                const cat2 = students.filter(s => s.score > 5 && s.score < 8).sort((a,b) => b.score - a.score);
+                const cat3 = students.filter(s => s.score <= 5).sort((a,b) => b.score - a.score);
+
+                let newGroups = Array.from({ length: 6 }, () => []);
+                [cat1, cat2, cat3].forEach(cat => {
+                    cat.forEach((s, i) => newGroups[i % 6].push(s));
+                });
+
+                newGroups = newGroups.map(g => {
+                    const sorted = g.sort((a,b) => b.score - a.score);
+                    return sorted.map((s, i) => ({ ...s, isLeader: i === 0 }));
+                });
+
+                setTimeout(() => { setGroups(newGroups); setLoading(false); setStage('result1'); }, 1500);
+            };
+
+            const handleRound2 = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                setLoading(true);
+                const data = await readExcel(file);
+                const r2Scores = data.map(r => ({ name: r['Họ Tên'] || r['Tên'], score: parseFloat(r['Điểm Số'] || r['Diem'] || 0) }));
+
+                setTimeout(() => {
+                    const final = groups.map((g, idx) => {
+                        const members = g.map(m => ({
+                            ...m,
+                            scoreV2: r2Scores.find(s => s.name === m.name)?.score || 0
+                        }));
+                        const avg = members.reduce((a, b) => a + b.scoreV2, 0) / members.length;
+                        const min = Math.min(...members.map(m => m.scoreV2));
+                        const max = Math.max(...members.map(m => m.scoreV2));
+
+                        // LOGIC: Hệ số K Elite
+                        let k = 1;
+                        if (max >= 8) k = 1.2;
+                        else if (min > 5 && min < 8) k = 1;
+                        else if (min <= 5) k = 0.5;
+
+                        return {
+                            id: idx + 1,
+                            members: members.sort((a,b) => a.scoreV2 - b.scoreV2), // Thấp đến cao
+                            finalScore: avg * k,
+                            formula: `${avg.toFixed(2)} x ${k}`
+                        };
+                    }).sort((a, b) => b.finalScore - a.finalScore);
+
+                    setResults(final);
+                    setLoading(false);
+                    setStage('result2');
+                    if (audioRef.current) audioRef.current.play().catch(() => {});
+                    const fwInterval = setInterval(createFirework, 400);
+                    setTimeout(() => clearInterval(fwInterval), 12000);
+                }, 2000);
+            };
+
+            if (loading) return (
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-3xl p-12 text-center">
+                        <div className="w-16 h-16 border-4 border-t-indigo-600 rounded-full animate-spin mx-auto mb-4"></div>
+                        <h3 className="text-xl font-bold text-gray-800">Đang xử lý dữ liệu...</h3>
+                    </div>
+                </div>
+            );
+
+            if (stage === 'round1') return (
+                <div className="min-h-screen flex items-center justify-center p-4">
+                    <div className="bg-white rounded-3xl shadow-2xl p-16 text-center max-w-xl w-full">
+                        <div className="w-24 h-24 bg-indigo-600 rounded-full flex items-center justify-center mx-auto mb-6 text-white animate-float shadow-lg text-4xl">📁</div>
+                        <h1 className="text-4xl font-black mb-4 text-indigo-700">VÒNG 1</h1>
+                        <p className="text-gray-500 mb-8">Tải file điểm để phân nhóm học lực đều</p>
+                        <input type="file" onChange={handleRound1} className="hidden" id="file1" accept=".xlsx" />
+                        <label htmlFor="file1" className="bg-indigo-600 text-white px-10 py-4 rounded-xl font-bold hover:bg-indigo-700 cursor-pointer block">Chọn File Excel</label>
+                    </div>
+                </div>
+            );
+
+            if (stage === 'result1') return (
+                <div className="p-8 max-w-7xl mx-auto">
+                    <h2 className="text-4xl font-black text-white text-center mb-12 italic">DANH SÁCH NHÓM ĐÃ CHIA</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-12">
+                        {groups.map((g, i) => (
+                            <div key={i} className="group-card p-6">
+                                <h3 className="text-xl font-black mb-4 text-indigo-600 border-b pb-2">Nhóm {i + 1}</h3>
+                                <div className="space-y-2">
+                                    {g.map((s, si) => (
+                                        <div key={si} className={`flex justify-between p-2 rounded ${s.isLeader ? 'bg-amber-50 border border-amber-200 font-bold' : ''}`}>
+                                            <span>{s.isLeader ? '👑 ' : ''}{s.name} {s.isLeader ? '(Trưởng)' : ''}</span>
+                                            <span className="text-indigo-600 font-bold">{s.score}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="text-center"><button onClick={() => setStage('round2')} className="bg-white text-indigo-600 px-12 py-4 rounded-xl font-black text-xl shadow-xl hover:scale-105 transition-transform">TIẾP TỤC VÒNG 2 →</button></div>
+                </div>
+            );
+
+            if (stage === 'round2') return (
+                <div className="min-h-screen flex items-center justify-center p-4">
+                    <div className="bg-white rounded-3xl shadow-2xl p-16 text-center max-w-xl w-full">
+                        <div className="w-24 h-24 bg-purple-600 rounded-full flex items-center justify-center mx-auto mb-6 text-white animate-float shadow-lg text-4xl">🏆</div>
+                        <h1 className="text-4xl font-black mb-4 text-purple-700">VÒNG 2</h1>
+                        <p className="text-gray-500 mb-8">Tải file điểm vòng 2 để tìm nhà vô địch</p>
+                        <input type="file" onChange={handleRound2} className="hidden" id="file2" accept=".xlsx" />
+                        <label htmlFor="file2" className="bg-purple-600 text-white px-10 py-4 rounded-xl font-bold hover:bg-purple-700 cursor-pointer block">Tính Điểm Chung Cuộc</label>
+                    </div>
+                </div>
+            );
+
+            if (stage === 'result2') {
+                const medals = [
+                    { bg: 'from-blue-400 to-indigo-600', crown: '💎', label: 'HẠNG 1' },
+                    { bg: 'from-yellow-400 to-amber-600', crown: '🥇', label: 'HẠNG 2' },
+                    { bg: 'from-orange-400 to-red-600', crown: '🥉', label: 'HẠNG 3' }
+                ];
+                return (
+                    <div className="p-8 max-w-7xl mx-auto">
+                        <audio ref={audioRef} loop src="c:\Users\sonph\Downloads\MathTech\Nhạc trao bằng khen, Trao giải thưởng cho buổi lễ.mp3" />
+                        <h2 className="text-5xl font-black text-white text-center mb-16 uppercase tracking-tighter">🏆 Vinh Danh Chiến Thắng 🏆</h2>
+                        <div className="flex flex-col lg:flex-row items-end justify-center gap-8 mb-16">
+                            {results[1] && <PodiumCard data={results[1]} m={medals[1]} />}
+                            {results[0] && <PodiumCard data={results[0]} m={medals[0]} isMain={true} />}
+                            {results[2] && <PodiumCard data={results[2]} m={medals[2]} />}
+                        </div>
+                        <div className="bg-white/10 backdrop-blur-md rounded-3xl p-8">
+                            <h3 className="text-white font-bold mb-6 text-center uppercase">Bảng xếp hạng chi tiết</h3>
+                            <div className="space-y-3">
+                                {results.slice(3).map((r, i) => (
+                                    <div key={i} className="bg-white p-4 rounded-xl flex justify-between items-center">
+                                        <span className="font-bold text-gray-500">#{i+4} Nhóm {r.id}</span>
+                                        <span className="font-black text-indigo-600">{r.finalScore.toFixed(2)}đ</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+        }
+
+        function PodiumCard({ data, m, isMain }) {
+            return (
+                <div className={`bg-white rounded-3xl overflow-hidden shadow-2xl transition-all w-full lg:w-80 ${isMain ? 'lg:-translate-y-8 border-4 border-cyan-300' : ''}`}>
+                    <div className={`bg-gradient-to-br ${m.bg} p-8 text-white text-center`}>
+                        <div className="text-5xl mb-2">{m.crown}</div>
+                        <div className="text-xs font-bold opacity-80">{m.label}</div>
+                        <h3 className="text-2xl font-black mt-1">Nhóm {data.id}</h3>
+                        <div className="mt-4 bg-white/20 rounded-full py-1 px-4 inline-block text-xl font-black">{data.finalScore.toFixed(2)}</div>
+                        <div className="block text-[10px] mt-1 opacity-70">({data.formula})</div>
+                    </div>
+                    <div className="p-5">
+                        <p className="text-[10px] font-bold text-gray-400 mb-2 uppercase">Thành viên (Thấp → Cao):</p>
+                        {data.members.map((mem, i) => (
+                            <div key={i} className="flex justify-between py-1 border-b border-gray-50 text-xs">
+                                <span>{mem.name}</span>
+                                <span className="font-bold text-indigo-600">{mem.scoreV2}đ</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('app')).render(<App />);
+    </script>
+</body>
+</html>
