@@ -49,6 +49,19 @@
     <script type="text/babel">
         const { useState, useRef } = React;
 
+        // Hàm hỗ trợ loại bỏ dấu tiếng Việt
+        function removeVietnameseTones(str) {
+            if (!str) return "";
+            str = str.toString().toLowerCase().trim();
+            // Xóa dấu
+            str = str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+            // Thay thế chữ đ/Đ
+            str = str.replace(/đ/g, "d");
+            // Xóa ký tự đặc biệt nếu cần, nhưng giữ lại chữ cái và số
+            // Ở đây ta chỉ cần xóa dấu là đủ
+            return str;
+        }
+
         function createFirework() {
             const container = document.getElementById('fireworks');
             if (!container) return;
@@ -93,7 +106,6 @@
                 setLoading(true);
                 const data = await readExcel(file);
                 
-                // LOGIC: Phân chia cân bằng (Elite)
                 const students = data.map(r => ({ 
                     name: r['Họ Tên'] || r['Tên'], 
                     score: parseFloat(r['Điểm Số'] || r['Diem'] || 0) 
@@ -121,19 +133,34 @@
                 if (!file) return;
                 setLoading(true);
                 const data = await readExcel(file);
-                const r2Scores = data.map(r => ({ name: r['Họ Tên'] || r['Tên'], score: parseFloat(r['Điểm Số'] || r['Diem'] || 0) }));
+                
+                const r2Scores = data.map(r => ({ 
+                    name: r['Họ Tên'] || r['Tên'], 
+                    score: parseFloat(r['Điểm Số'] || r['Diem'] || 0) 
+                }));
 
                 setTimeout(() => {
                     const final = groups.map((g, idx) => {
-                        const members = g.map(m => ({
-                            ...m,
-                            scoreV2: r2Scores.find(s => s.name === m.name)?.score || 0
-                        }));
+                        const members = g.map(m => {
+                            // --- LOGIC MỚI: SO SÁNH KHÔNG DẤU ---
+                            // Tìm trong danh sách điểm vòng 2
+                            const matchedScore = r2Scores.find(s => {
+                                // Chuẩn hóa cả 2 tên về dạng không dấu, chữ thường
+                                const nameV1 = removeVietnameseTones(m.name);
+                                const nameV2 = removeVietnameseTones(s.name);
+                                return nameV1 === nameV2;
+                            });
+
+                            return {
+                                ...m,
+                                scoreV2: matchedScore ? matchedScore.score : 0
+                            };
+                        });
+
                         const avg = members.reduce((a, b) => a + b.scoreV2, 0) / members.length;
                         const min = Math.min(...members.map(m => m.scoreV2));
                         const max = Math.max(...members.map(m => m.scoreV2));
 
-                        // LOGIC: Hệ số K Elite
                         let k = 1;
                         if (max >= 8) k = 1.2;
                         else if (min > 5 && min < 8) k = 1;
@@ -141,7 +168,7 @@
 
                         return {
                             id: idx + 1,
-                            members: members.sort((a,b) => a.scoreV2 - b.scoreV2), // Thấp đến cao
+                            members: members.sort((a,b) => a.scoreV2 - b.scoreV2),
                             finalScore: avg * k,
                             formula: `${avg.toFixed(2)} x ${k}`
                         };
@@ -219,7 +246,7 @@
                 ];
                 return (
                     <div className="p-8 max-w-7xl mx-auto">
-                        <audio ref={audioRef} loop src="c:\Users\sonph\Downloads\MathTech\Nhạc trao bằng khen, Trao giải thưởng cho buổi lễ.mp3" />
+                        <audio ref={audioRef} loop src="Nhạc trao bằng khen, Trao giải thưởng cho buổi lễ.mp3" />
                         <h2 className="text-5xl font-black text-white text-center mb-16 uppercase tracking-tighter">🏆 Vinh Danh Chiến Thắng 🏆</h2>
                         <div className="flex flex-col lg:flex-row items-end justify-center gap-8 mb-16">
                             {results[1] && <PodiumCard data={results[1]} m={medals[1]} />}
